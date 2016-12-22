@@ -1,4 +1,3 @@
-FW_DIR	:= /lib/firmware/rtl_bt
 
 EXTRA_CFLAGS += $(USER_EXTRA_CFLAGS)
 EXTRA_CFLAGS += -O1
@@ -53,7 +52,7 @@ CONFIG_PNO_SUPPORT = n
 CONFIG_PNO_SET_DEBUG = n
 CONFIG_AP_WOWLAN = n
 ###################### Platform Related #######################
-CONFIG_PLATFORM_I386_PC = y
+CONFIG_PLATFORM_I386_PC = n
 ###############################################################
 
 CONFIG_DRVEXT_MODULE = n
@@ -249,25 +248,39 @@ EXTRA_CFLAGS += -DCONFIG_GPIO_WAKEUP
 endif
 
 
-ifeq ($(CONFIG_PLATFORM_I386_PC), y)
 EXTRA_CFLAGS += -DCONFIG_IOCTL_CFG80211
 EXTRA_CFLAGS += -DRTW_USE_CFG80211_STA_EVENT # only enable when kernel >= 3.2
 EXTRA_CFLAGS += -DCONFIG_P2P_IPS
+
+FW_DIR	:= $(TARGET_DIR)/lib/firmware/rtl_bt
+
+ifeq ($(CONFIG_PLATFORM_I386_PC), y)
 SUBARCH := $(shell uname -m | sed -e s/i.86/i386/ | sed -e s/ppc/powerpc/ | sed -e s/armv.l/arm/)
 ARCH ?= $(SUBARCH)
 CROSS_COMPILE ?=
 KVER  := $(shell uname -r)
 KSRC := /lib/modules/$(KVER)/build
-MODDESTDIR := /lib/modules/$(KVER)/kernel/drivers/net/wireless/
 INSTALL_PREFIX :=
 endif
+
+
+MODDESTDIR ?= $(TARGET_DIR)/lib/modules/$(KVER)/kernel/drivers/net/wireless/
+DEPMOD     ?= depmod
 
 
 ifneq ($(USER_MODULE_NAME),)
 MODULE_NAME := $(USER_MODULE_NAME)
 endif
 
+ifneq ($(TARGET_DIR),)
+DEPMOD_PREFIX = -b $(TARGET_DIR)
+else
+DEPMOD_PREFIX = 
+endif
 
+
+
+# IF executed by the KERNEL build
 ifneq ($(KERNELRELEASE),)
 
 rtk_core :=	core/rtw_cmd.o \
@@ -311,11 +324,16 @@ $(MODULE_NAME)-y += $(_PLATFORM_FILES)
 
 obj-$(CONFIG_RTL8723BU) := $(MODULE_NAME).o
 
+
+
+# IF executed by 'make' on the commandline by user (or install scripts)
 else
 
 export CONFIG_RTL8723BU = m
 
 all: modules
+
+$(MODULE_NAME).ko: modules
 
 modules:
 	$(MAKE) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) -C $(KSRC) M=$(shell pwd)  modules
@@ -323,9 +341,13 @@ modules:
 strip:
 	$(CROSS_COMPILE)strip $(MODULE_NAME).ko --strip-unneeded
 
-install:
+install: modules_install
+
+modules_install: $(MODULE_NAME).ko
+	echo "Making install!: pwd is: $(shell pwd)"
+	mkdir -p $(MODDESTDIR)
 	install -p -m 644 $(MODULE_NAME).ko  $(MODDESTDIR)
-	/sbin/depmod -a ${KVER}
+	$(DEPMOD) $(DEPMOD_PREFIX) -a ${KVER} 
 	mkdir -p $(FW_DIR)
 	cp -f rtl8723b_fw.bin $(FW_DIR)/rtl8723b_fw.bin
 
